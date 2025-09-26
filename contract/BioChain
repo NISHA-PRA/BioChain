@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+/**
+ * @title BioChain
+ * @dev Smart contract for secure biological data management and verification
+ * @author BioChain Development Team
+ */
+contract BioChain {
+    
+    // Events
+    event DataStored(address indexed researcher, bytes32 indexed dataHash, uint256 timestamp);
+    event DataVerified(bytes32 indexed dataHash, address indexed verifier, uint256 timestamp);
+    event ResearcherRegistered(address indexed researcher, string name, uint256 timestamp);
+    
+    // Structs
+    struct BiologicalData {
+        address researcher;
+        string dataType;        // e.g., "DNA_SEQUENCE", "PROTEIN_STRUCTURE", "CLINICAL_TRIAL"
+        bytes32 dataHash;       // Hash of the actual data for integrity
+        string metadataURI;     // IPFS URI for metadata
+        uint256 timestamp;
+        bool isVerified;
+        address verifiedBy;
+        uint256 verificationTime;
+    }
+    
+    struct Researcher {
+        string name;
+        string institution;
+        bool isActive;
+        uint256 registrationTime;
+        uint256 dataCount;
+    }
+    
+    // State variables
+    mapping(bytes32 => BiologicalData) public biologicalDataRecords;
+    mapping(address => Researcher) public researchers;
+    mapping(address => bool) public authorizedVerifiers;
+    
+    address public owner;
+    uint256 public totalDataRecords;
+    
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can perform this action");
+        _;
+    }
+    
+    modifier onlyRegisteredResearcher() {
+        require(researchers[msg.sender].isActive, "Only registered researchers can perform this action");
+        _;
+    }
+    
+    modifier onlyAuthorizedVerifier() {
+        require(authorizedVerifiers[msg.sender], "Only authorized verifiers can perform this action");
+        _;
+    }
+    
+    constructor() {
+        owner = msg.sender;
+        authorizedVerifiers[msg.sender] = true; // Owner is initial verifier
+    }
+    
+    /**
+     * @dev Core Function 1: Register a new researcher
+     * @param _name Name of the researcher
+     * @param _institution Institution affiliation
+     */
+    function registerResearcher(string memory _name, string memory _institution) external {
+        require(bytes(_name).length > 0, "Name cannot be empty");
+        require(bytes(_institution).length > 0, "Institution cannot be empty");
+        require(!researchers[msg.sender].isActive, "Researcher already registered");
+        
+        researchers[msg.sender] = Researcher({
+            name: _name,
+            institution: _institution,
+            isActive: true,
+            registrationTime: block.timestamp,
+            dataCount: 0
+        });
+        
+        emit ResearcherRegistered(msg.sender, _name, block.timestamp);
+    }
+    
+    /**
+     * @dev Core Function 2: Store biological data with integrity verification
+     * @param _dataType Type of biological data
+     * @param _dataHash Hash of the actual data for integrity checking
+     * @param _metadataURI IPFS URI containing metadata
+     */
+    function storeBiologicalData(
+        string memory _dataType,
+        bytes32 _dataHash,
+        string memory _metadataURI
+    ) external onlyRegisteredResearcher {
+        require(_dataHash != bytes32(0), "Data hash cannot be empty");
+        require(bytes(_dataType).length > 0, "Data type cannot be empty");
+        require(biologicalDataRecords[_dataHash].timestamp == 0, "Data already exists");
+        
+        biologicalDataRecords[_dataHash] = BiologicalData({
+            researcher: msg.sender,
+            dataType: _dataType,
+            dataHash: _dataHash,
+            metadataURI: _metadataURI,
+            timestamp: block.timestamp,
+            isVerified: false,
+            verifiedBy: address(0),
+            verificationTime: 0
+        });
+        
+        researchers[msg.sender].dataCount++;
+        totalDataRecords++;
+        
+        emit DataStored(msg.sender, _dataHash, block.timestamp);
+    }
+    
+    /**
+     * @dev Core Function 3: Verify biological data authenticity
+     * @param _dataHash Hash of the data to verify
+     */
+    function verifyBiologicalData(bytes32 _dataHash) external onlyAuthorizedVerifier {
+        require(biologicalDataRecords[_dataHash].timestamp != 0, "Data does not exist");
+        require(!biologicalDataRecords[_dataHash].isVerified, "Data already verified");
+        require(biologicalDataRecords[_dataHash].researcher != msg.sender, "Cannot verify own data");
+        
+        biologicalDataRecords[_dataHash].isVerified = true;
+        biologicalDataRecords[_dataHash].verifiedBy = msg.sender;
+        biologicalDataRecords[_dataHash].verificationTime = block.timestamp;
+        
+        emit DataVerified(_dataHash, msg.sender, block.timestamp);
+    }
+    
+    // Additional utility functions
+    
+    /**
+     * @dev Add an authorized verifier (only owner)
+     * @param _verifier Address to authorize as verifier
+     */
+    function addVerifier(address _verifier) external onlyOwner {
+        require(_verifier != address(0), "Invalid verifier address");
+        authorizedVerifiers[_verifier] = true;
+    }
+    
+    /**
+     * @dev Remove an authorized verifier (only owner)
+     * @param _verifier Address to remove from verifiers
+     */
+    function removeVerifier(address _verifier) external onlyOwner {
+        require(_verifier != owner, "Cannot remove owner as verifier");
+        authorizedVerifiers[_verifier] = false;
+    }
+    
+    /**
+     * @dev Get biological data information
+     * @param _dataHash Hash of the data to retrieve
+     */
+    function getBiologicalData(bytes32 _dataHash) external view returns (
+        address researcher,
+        string memory dataType,
+        string memory metadataURI,
+        uint256 timestamp,
+        bool isVerified,
+        address verifiedBy,
+        uint256 verificationTime
+    ) {
+        BiologicalData memory data = biologicalDataRecords[_dataHash];
+        require(data.timestamp != 0, "Data does not exist");
+        
+        return (
+            data.researcher,
+            data.dataType,
+            data.metadataURI,
+            data.timestamp,
+            data.isVerified,
+            data.verifiedBy,
+            data.verificationTime
+        );
+    }
+    
+    /**
+     * @dev Get researcher information
+     * @param _researcher Address of the researcher
+     */
+    function getResearcher(address _researcher) external view returns (
+        string memory name,
+        string memory institution,
+        bool isActive,
+        uint256 registrationTime,
+        uint256 dataCount
+    ) {
+        Researcher memory researcher = researchers[_researcher];
+        require(researcher.isActive, "Researcher not found or inactive");
+        
+        return (
+            researcher.name,
+            researcher.institution,
+            researcher.isActive,
+            researcher.registrationTime,
+            researcher.dataCount
+        );
+    }
+    
+    /**
+     * @dev Check if data exists and is verified
+     * @param _dataHash Hash of the data to check
+     */
+    function isDataVerified(bytes32 _dataHash) external view returns (bool) {
+        return biologicalDataRecords[_dataHash].isVerified;
+    }
+}
